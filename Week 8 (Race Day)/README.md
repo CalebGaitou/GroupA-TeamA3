@@ -4,8 +4,8 @@
 
 ---
 
-## 1. Main Loop & State Machine
-The core of the robot is a **Finite State Machine (FSM)**. The `loop()` function acts as a central dispatcher, ensuring that only the logic for the current mission phase is executed.
+## 1. Main Loop & States
+The core of the robot is a **Finite States (FSM)**. The `loop()` function acts as a central dispatcher, ensuring that only the logic for the current mission phase is executed.
 
 * **STATE_DISPATCH:** Transitions are handled via the `currentRobotState` variable.
 * **SYSTEM_TICK:** `refreshServo()` and `updateLEDs()` run every cycle to maintain hardware stability.
@@ -66,3 +66,5 @@ const float KP_GAIN = 20.0;             // Aggressiveness of turn
 const float KD_GAIN = 12.0;             // Stability/Dampening
 const int SPEED_BASE = 200;             // Standard cruise PWM
 const int OBSTACLE_THRESHOLD_CM = 20;   // Start trigger distance
+
+[Race Day Test Code - Group A Team A3](https://github.com/CalebGaitou/GroupA-TeamA3/tree/main/Week%208%20(Race%20Day)/RaceTest)
