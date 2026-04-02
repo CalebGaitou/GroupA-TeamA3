@@ -2,6 +2,61 @@
 > **Module:** Autonomous Robotics  
 > **System:** Arduino-based State Machine with PD Line Following
 
+### System Activity Diagram
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#007acc', 'edgeLabelBackground':'#ffffff', 'tertiaryColor': '#fff'}}}%%
+graph TD
+    %% Define Start and End nodes
+    Start([Start Power On]) --> Init[Initialize Hardware<br/>Stop Motors, Open Gripper]
+    
+    %% --- STATE: WAIT_FOR_START ---
+    Init --> WAIT_FOR_START
+    subgraph "Phase 1: Setup"
+    WAIT_FOR_START{Ultrasonic Sensor<br/>Detect Object < 20cm?}
+    WAIT_FOR_START -- No --> WAIT_FOR_START
+    WAIT_FOR_START -- Yes --> Delay[Wait 4 Seconds<br/>Clear Area]
+    end
+
+    %% --- STATE: CONE_STATE / GRAB ---
+    subgraph "Phase 2: Retrieval"
+    Delay --> CONE_STATE[Drive Forward<br/>1100 ms]
+    CONE_STATE --> CONE_GRAB[Stop Motors<br/>Close Gripper]
+    end
+
+    %% --- STATE: FOLLOWING ---
+    subgraph "Phase 3: Navigation"
+    CONE_GRAB --> ON_COURSE[Pivot Left<br/>Find Line]
+    ON_COURSE --> FOLLOWING
+    
+    FOLLOWING{Read 8 Sensors}
+    
+    %% PD Logic Branch
+    FOLLOWING -- Line Detected --> PD_Math[Calculate PD Error<br/>Kp * Error + Kd * Diff]
+    PD_Math --> Drive[Adjust Motors<br/>Smooth Steering]
+    Drive --> FOLLOWING
+    
+    %% Junction/Turn Branch
+    FOLLOWING -- Junction Detected<br/>(Outer Sensors Black) --> CROSSING[Drive Forward<br/>150ms]
+    CROSSING --> TURNING[Pivot in Turn Direction<br/>300ms Blind]
+    TURNING --> SEARCH[Pivot until Center<br/>Sensors find line]
+    SEARCH --> FOLLOWING
+
+    %% Recover Branch
+    FOLLOWING -- No Line --> RECOVER[Pivot in Last Known<br/>Error Direction]
+    RECOVER --> FOLLOWING
+    
+    %% Finish Condition
+    FOLLOWING -- Finish Detected<br/>(All Black > 100ms) --> FINISH[Drive Pass-Through]
+    end
+
+    %% --- STATE: FINISH / DONE ---
+    subgraph "Phase 4: Shutdown"
+    FINISH --> BACKUP[Backup 600ms]
+    BACKUP --> DONE[Stop Motors<br/>Set LEDs Purple]
+    DONE --> EndNode([End Mission])
+    end
+```
 ---
 
 ## 1. Main Loop & States
