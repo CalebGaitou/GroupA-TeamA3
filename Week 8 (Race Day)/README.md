@@ -58,6 +58,12 @@ Technical functions that support the main logic:
 
 ---
 
+## Project Source
+You can find the full code and version history here:
+[Race Day Test Code - Group A Team A3](https://github.com/CalebGaitou/GroupA-TeamA3/tree/main/Week%208%20(Race%20Day)/RaceTest)
+
+---
+
 ## Tuning Constants
 Current optimized values for the competition track:
 
@@ -66,9 +72,3 @@ const float KP_GAIN = 20.0;             // Aggressiveness of turn
 const float KD_GAIN = 12.0;             // Stability/Dampening
 const int SPEED_BASE = 200;             // Standard cruise PWM
 const int OBSTACLE_THRESHOLD_CM = 20;   // Start trigger distance
-
----
-    
-## Project Source
-You can find the full code and version history here:
-[Race Day Test Code - Group A Team A3](https://github.com/CalebGaitou/GroupA-TeamA3/tree/main/Week%208%20(Race%20Day)/RaceTest)
