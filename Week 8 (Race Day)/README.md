@@ -1,4 +1,4 @@
-# BattleBot Portfolio: GripperBot-PD
+# BattleBot 
 > **Module:** Autonomous Robotics  
 > **System:** Arduino-based State Machine with PD Line Following
 

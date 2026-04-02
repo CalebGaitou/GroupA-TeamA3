@@ -1,8 +1,7 @@
 # GroupA-TeamA3
 Our subgroup
 
-# Project: GripperBot-PD (BattleBot)
-> An autonomous search-and-retrieve robot using high-speed PD line-following logic and a state-machine architecture.
+# Project: BattleBot Line Maze
 
 ---
 
