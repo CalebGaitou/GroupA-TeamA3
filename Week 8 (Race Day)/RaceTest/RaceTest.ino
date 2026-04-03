@@ -1,8 +1,8 @@
 /**
- * @file RobotControl.ino
- * @brief Line-following robot with gripper and NeoPixel status indicators.
- * Adheres to Makerguides C++ Style Guide naming and formatting.
- */
+* @file RobotControl.ino
+* @brief Line-following robot with gripper and NeoPixel status indicators.
+* Adheres to Makerguides C++ Style Guide naming and formatting.
+*/
 
 #include <Adafruit_NeoPixel.h>
 
@@ -15,10 +15,10 @@ const uint8_t SENSOR_COUNT = 8;
 Adafruit_NeoPixel ledStrip(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 // LED Indices
-const int FRONT_LEFT  = 0;
-const int FRONT_RIGHT = 1;
-const int REAR_RIGHT  = 2;
-const int REAR_LEFT   = 3;
+const int REAR_LEFT  = 0;
+const int REAR_RIGHT = 1;
+const int FRONT_RIGHT  = 2;
+const int FRONT_LEFT   = 3;
 
 // Motor Pin Definitions
 const int MOTOR_A_1_PIN = 11; // Left backward
@@ -43,9 +43,9 @@ const int LINE_THRESHOLD = 800;
 // PID and Speed Settings
 const float KP_GAIN = 20.0;
 const float KD_GAIN = 12.0;
-const int SPEED_BASE = 200;
+const int SPEED_BASE = 220;
 const int SPEED_MIN = 160;
-const int SPEED_PIVOT = 180;
+const int SPEED_PIVOT = 190;
 
 // Timing and Thresholds (ms)
 const unsigned long CONE_DRIVE_DURATION = 1100;
@@ -55,13 +55,14 @@ const unsigned long BLIND_TURN_DURATION = 300;
 const unsigned long U_TURN_DURATION = 600;
 const unsigned long COOLDOWN_DURATION = 250;
 const unsigned long IGNORE_FINISH_DURATION = 3000;
-const unsigned long FINISH_CONFIRM_THRESHOLD = 100;
-const unsigned long BACKUP_DURATION = 600;
+const unsigned long FINISH_CONFIRM_THRESHOLD = 30;
+const unsigned long BACKUP_DURATION = 2000;
 
 const int BACKUP_SPEED = -200;
 const int STOP_THRESHOLD = 2;
 const int WAIT_TO_START_DELAY = 4000;
 const int OBSTACLE_THRESHOLD_CM = 20;
+const int OBSTACLE_DEADEND = 10;
 
 /** @brief Enum for the Robot State Machine */
 enum RobotState {
@@ -75,6 +76,7 @@ enum RobotState {
     SEARCH,
     COOLDOWN,
     RECOVER,
+    DEADEND,
     FINISH,
     BACKUP,
     DONE
@@ -97,8 +99,8 @@ unsigned long lastServoPulse = 0;
 // ============================================================
 
 /**
- * @brief Logs state transitions to the Serial monitor.
- */
+* @brief Logs state transitions to the Serial monitor.
+*/
 void debugState(String stateName) {
     if (currentRobotState != lastDebugState) {
         Serial.print("STATE CHANGE: ");
@@ -108,8 +110,8 @@ void debugState(String stateName) {
 }
 
 /**
- * @brief Non-blocking pulse management for the gripper servo.
- */
+* @brief Non-blocking pulse management for the gripper servo.
+*/
 void refreshServo() {
     if (millis() - lastServoPulse >= 20) {
         digitalWrite(SERVO_PIN, HIGH);
@@ -120,24 +122,24 @@ void refreshServo() {
 }
 
 /**
- * @brief Measures distance using the ultrasonic sensor.
- * @return Distance in cm, or 999 if no object detected.
- */
+* @brief Measures distance using the ultrasonic sensor.
+* @return Distance in cm, or 999 if no object detected.
+*/
 long getDistanceCm() {
     digitalWrite(TRIGGER_PIN, LOW);
     delayMicroseconds(2);
     digitalWrite(TRIGGER_PIN, HIGH);
     delayMicroseconds(10);
     digitalWrite(TRIGGER_PIN, LOW);
-    
+
     long duration = pulseIn(ECHO_PIN, HIGH, 20000); 
     if (duration == 0) return 999;
     return duration * 0.034 / 2;
 }
 
 /**
- * @brief Controls specific motor pins based on speed.
- */
+* @brief Controls specific motor pins based on speed.
+*/
 void setMotorSpeed(int forwardPin, int backwardPin, int speed) {
     speed = constrain(speed, -255, 255);
     if (speed >= 0) {
@@ -172,8 +174,8 @@ void pivotRight(int speed = SPEED_PIVOT) {
 }
 
 /**
- * @brief Updates NeoPixel colors based on current robot state.
- */
+* @brief Updates NeoPixel colors based on current robot state.
+*/
 void updateLEDs() {
     ledStrip.clear();
 
@@ -204,8 +206,8 @@ void updateLEDs() {
         case WAIT_FOR_START:
         case FINISH:
         case BACKUP:
-            ledStrip.setPixelColor(FRONT_LEFT, red);
-            ledStrip.setPixelColor(FRONT_RIGHT, red);
+            ledStrip.setPixelColor(REAR_LEFT, red);
+            ledStrip.setPixelColor(REAR_RIGHT, red);
             break;
 
         case CONE_STATE:
@@ -228,9 +230,19 @@ void setup() {
     pinMode(MOTOR_A_2_PIN, OUTPUT);
     pinMode(MOTOR_B_1_PIN, OUTPUT);
     pinMode(MOTOR_B_2_PIN, OUTPUT);
+
+    digitalWrite(MOTOR_A_1_PIN, LOW);
+    digitalWrite(MOTOR_A_2_PIN, LOW);
+    digitalWrite(MOTOR_B_1_PIN, LOW);
+    digitalWrite(MOTOR_B_2_PIN, LOW);
+
     pinMode(TRIGGER_PIN, OUTPUT);
     pinMode(ECHO_PIN, INPUT);
     pinMode(SERVO_PIN, OUTPUT);
+
+    digitalWrite(TRIGGER_PIN, LOW);
+    digitalWrite(ECHO_PIN, LOW);
+    digitalWrite(SERVO_PIN, LOW);
 
     stopMotors();
     isGripperClosed = false; 
@@ -246,13 +258,12 @@ void setup() {
 void loop() {
     refreshServo(); 
     updateLEDs();
-    
+
     int sensorValues[SENSOR_COUNT];
     long weightedSum = 0;
     int activeSensorCount = 0;
     unsigned long currentTime = millis();
 
-    // Data acquisition
     if (currentRobotState >= FOLLOWING) {
         for (int i = 0; i < SENSOR_COUNT; i++) {
             sensorValues[i] = analogRead(SENSOR_PINS[i]);
@@ -306,6 +317,13 @@ void loop() {
 
         case FOLLOWING:
             debugState("FOLLOWING");
+
+            if (getDistanceCm() < OBSTACLE_DEADEND) { // If something is within 10cm
+                stopMotors();
+                currentRobotState = DEADEND; // Or DEADEND if you have that state
+                stateStartTime = currentTime;
+                break;
+            }
             
             // Finish detection
             if (activeSensorCount >= 7 && (currentTime - raceStartTime > IGNORE_FINISH_DURATION)) {
@@ -314,6 +332,8 @@ void loop() {
                 } else if (currentTime - finishDetectionTime >= FINISH_CONFIRM_THRESHOLD) {
                     currentRobotState = FINISH;
                     stateStartTime = currentTime;
+                    stopMotors();
+                    return;
                 }
                 driveForward();
                 break;
@@ -331,7 +351,9 @@ void loop() {
             {
                 // A6 and A7 are your far-left sensors
                 bool hasLeft = (sensorValues[6] > LINE_THRESHOLD || sensorValues[7] > LINE_THRESHOLD);
-                
+                bool hasStraight = (sensorValues[3] > LINE_THRESHOLD || sensorValues[4] > LINE_THRESHOLD);
+                bool hasRight = (sensorValues[0] > LINE_THRESHOLD || sensorValues[1] > LINE_THRESHOLD);
+
                 if (hasLeft) { 
                     // We found the turn! Stop the PD controller immediately.
                     stopMotors(); 
@@ -340,10 +362,12 @@ void loop() {
                     stateStartTime = millis(); 
                     return; // Exit loop to start the turn sequence
                 }
-                
-                // Only check for Right if we didn't find a Left
-                bool hasRight = (sensorValues[0] > LINE_THRESHOLD || sensorValues[1] > LINE_THRESHOLD);
-                if (hasRight) {
+
+                else if (hasStraight) {
+                    // Do nothing here, let the PD code at the bottom execute
+                }
+
+                else if (hasRight) {
                     pendingTurnDirection = 1; 
                     currentRobotState = CROSSING; 
                     stateStartTime = millis(); 
@@ -373,7 +397,7 @@ void loop() {
 
         case TURNING:
             debugState("TURNING");
-            if (pendingTurnDirection == -1) pivotLeft(); else pivotRight();
+            if (pendingTurnDirection == -1) pivotLeft();
             if (currentTime - stateStartTime >= BLIND_TURN_DURATION) {
                 currentRobotState = SEARCH; 
                 stateStartTime = currentTime;
@@ -382,7 +406,7 @@ void loop() {
 
         case SEARCH:
             debugState("SEARCH");
-            if (pendingTurnDirection == -1) pivotLeft(); else pivotRight();
+            if (pendingTurnDirection == -1) pivotLeft();
             if (analogRead(SENSOR_PINS[3]) > LINE_THRESHOLD || analogRead(SENSOR_PINS[4]) > LINE_THRESHOLD) {
                 previousError = 0; 
                 currentRobotState = COOLDOWN; 
@@ -400,18 +424,35 @@ void loop() {
 
         case RECOVER:
             debugState("RECOVER");
-            if (previousError <= 0) pivotLeft(); else pivotRight();
+            if (previousError <= 0) pivotLeft();
             if (activeSensorCount > 0) currentRobotState = FOLLOWING;
+            break;
+
+        case DEADEND:
+            debugState("DEADEND");
+            pivotLeft(); 
+            
+            // Only start looking for the line after 600ms (U_TURN_DURATION)
+            if (currentTime - stateStartTime >= U_TURN_DURATION) {
+                if (analogRead(SENSOR_PINS[3]) > LINE_THRESHOLD || analogRead(SENSOR_PINS[4]) > LINE_THRESHOLD) {
+                    stopMotors();
+                    previousError = 0; 
+                    currentRobotState = COOLDOWN; 
+                    stateStartTime = currentTime;
+                }
+            }
             break;
 
         case FINISH:
             debugState("FINISH");
-            driveForward();
-            if (activeSensorCount <= STOP_THRESHOLD) { 
                 stopMotors(); 
-                currentRobotState = BACKUP; 
-                stateStartTime = currentTime; 
+                isGripperClosed = false;
+            for(int i = 0; i < 25; i++) { 
+                refreshServo(); 
+                delay(20); 
             }
+            currentRobotState = BACKUP; 
+            stateStartTime = currentTime; 
             break;
 
         case BACKUP:

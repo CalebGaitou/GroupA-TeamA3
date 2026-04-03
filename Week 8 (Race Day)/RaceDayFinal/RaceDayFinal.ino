@@ -1,8 +1,8 @@
 /**
- * @file RobotControl.ino
- * @brief Line-following robot with gripper and NeoPixel status indicators.
- * Adheres to Makerguides C++ Style Guide naming and formatting.
- */
+* @file RobotControl.ino
+* @brief Line-following robot with gripper and NeoPixel status indicators.
+* Adheres to Makerguides C++ Style Guide naming and formatting.
+*/
 
 #include <Adafruit_NeoPixel.h>
 
@@ -15,10 +15,10 @@ const uint8_t SENSOR_COUNT = 8;
 Adafruit_NeoPixel ledStrip(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 // LED Indices
-const int FRONT_LEFT  = 0;
-const int FRONT_RIGHT = 1;
-const int REAR_RIGHT  = 2;
-const int REAR_LEFT   = 3;
+const int REAR_LEFT  = 0;
+const int REAR_RIGHT = 1;
+const int FRONT_RIGHT  = 2;
+const int FRONT_LEFT   = 3;
 
 // Motor Pin Definitions
 const int MOTOR_A_1_PIN = 11; // Left backward
@@ -43,9 +43,9 @@ const int LINE_THRESHOLD = 800;
 // PID and Speed Settings
 const float KP_GAIN = 20.0;
 const float KD_GAIN = 12.0;
-const int SPEED_BASE = 200;
+const int SPEED_BASE = 220;
 const int SPEED_MIN = 160;
-const int SPEED_PIVOT = 180;
+const int SPEED_PIVOT = 190;
 
 // Timing and Thresholds (ms)
 const unsigned long CONE_DRIVE_DURATION = 1100;
@@ -55,13 +55,14 @@ const unsigned long BLIND_TURN_DURATION = 300;
 const unsigned long U_TURN_DURATION = 600;
 const unsigned long COOLDOWN_DURATION = 250;
 const unsigned long IGNORE_FINISH_DURATION = 3000;
-const unsigned long FINISH_CONFIRM_THRESHOLD = 100;
-const unsigned long BACKUP_DURATION = 600;
+const unsigned long FINISH_CONFIRM_THRESHOLD = 30;
+const unsigned long BACKUP_DURATION = 2000;
 
 const int BACKUP_SPEED = -200;
 const int STOP_THRESHOLD = 2;
 const int WAIT_TO_START_DELAY = 4000;
 const int OBSTACLE_THRESHOLD_CM = 20;
+const int OBSTACLE_DEADEND = 10;
 
 /** @brief Enum for the Robot State Machine */
 enum RobotState {
@@ -75,6 +76,7 @@ enum RobotState {
     SEARCH,
     COOLDOWN,
     RECOVER,
+    DEADEND,
     FINISH,
     BACKUP,
     DONE
@@ -97,8 +99,8 @@ unsigned long lastServoPulse = 0;
 // ============================================================
 
 /**
- * @brief Logs state transitions to the Serial monitor.
- */
+* @brief Logs state transitions to the Serial monitor.
+*/
 void debugState(String stateName) {
     if (currentRobotState != lastDebugState) {
         Serial.print("STATE CHANGE: ");
@@ -108,8 +110,8 @@ void debugState(String stateName) {
 }
 
 /**
- * @brief Non-blocking pulse management for the gripper servo.
- */
+* @brief Non-blocking pulse management for the gripper servo.
+*/
 void refreshServo() {
     if (millis() - lastServoPulse >= 20) {
         digitalWrite(SERVO_PIN, HIGH);
@@ -120,24 +122,24 @@ void refreshServo() {
 }
 
 /**
- * @brief Measures distance using the ultrasonic sensor.
- * @return Distance in cm, or 999 if no object detected.
- */
+* @brief Measures distance using the ultrasonic sensor.
+* @return Distance in cm, or 999 if no object detected.
+*/
 long getDistanceCm() {
     digitalWrite(TRIGGER_PIN, LOW);
     delayMicroseconds(2);
     digitalWrite(TRIGGER_PIN, HIGH);
     delayMicroseconds(10);
     digitalWrite(TRIGGER_PIN, LOW);
-    
+
     long duration = pulseIn(ECHO_PIN, HIGH, 20000); 
     if (duration == 0) return 999;
     return duration * 0.034 / 2;
 }
 
 /**
- * @brief Controls specific motor pins based on speed.
- */
+* @brief Controls specific motor pins based on speed.
+*/
 void setMotorSpeed(int forwardPin, int backwardPin, int speed) {
     speed = constrain(speed, -255, 255);
     if (speed >= 0) {
@@ -172,8 +174,8 @@ void pivotRight(int speed = SPEED_PIVOT) {
 }
 
 /**
- * @brief Updates NeoPixel colors based on current robot state.
- */
+* @brief Updates NeoPixel colors based on current robot state.
+*/
 void updateLEDs() {
     ledStrip.clear();
 
@@ -204,8 +206,8 @@ void updateLEDs() {
         case WAIT_FOR_START:
         case FINISH:
         case BACKUP:
-            ledStrip.setPixelColor(FRONT_LEFT, red);
-            ledStrip.setPixelColor(FRONT_RIGHT, red);
+            ledStrip.setPixelColor(REAR_LEFT, red);
+            ledStrip.setPixelColor(REAR_RIGHT, red);
             break;
 
         case CONE_STATE:
@@ -224,223 +226,252 @@ void updateLEDs() {
 
 // Setup & Loop
 void setup() {
-  pinMode(MOTOR_A_1_PIN, OUTPUT);
-  pinMode(MOTOR_A_2_PIN, OUTPUT);
-  pinMode(MOTOR_B_1_PIN, OUTPUT);
-  pinMode(MOTOR_B_2_PIN, OUTPUT);
+    pinMode(MOTOR_A_1_PIN, OUTPUT);
+    pinMode(MOTOR_A_2_PIN, OUTPUT);
+    pinMode(MOTOR_B_1_PIN, OUTPUT);
+    pinMode(MOTOR_B_2_PIN, OUTPUT);
 
-  analogwrite(MOTOR_A_1_PIN, LOW);
-  analogwrite(MOTOR_A_2_PIN, LOW);
-  analogwrite(MOTOR_B_1_PIN, LOw);
-  analogwrite(MOTOR_B_2_PIN, LOw);
+    digitalWrite(MOTOR_A_1_PIN, LOW);
+    digitalWrite(MOTOR_A_2_PIN, LOW);
+    digitalWrite(MOTOR_B_1_PIN, LOW);
+    digitalWrite(MOTOR_B_2_PIN, LOW);
 
-  pinMode(TRIGGER_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-  pinMode(SERVO_PIN, OUTPUT);
-  
-  analogwrite(TRIGGER_PIN, LOW);
-  analogwrite(ECHO_PIN, LOW);
-  analogwrite(SERVO_PIN, LOW);
+    pinMode(TRIGGER_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    pinMode(SERVO_PIN, OUTPUT);
 
-  stopMotors();
-  isGripperClosed = false; 
+    digitalWrite(TRIGGER_PIN, LOW);
+    digitalWrite(ECHO_PIN, LOW);
+    digitalWrite(SERVO_PIN, LOW);
 
-  ledStrip.begin();
-  ledStrip.setBrightness(50);
-  ledStrip.show();
+    stopMotors();
+    isGripperClosed = false; 
 
-  Serial.begin(9600);
-  Serial.println("--- ROBOT INITIALIZED ---");
+    ledStrip.begin();
+    ledStrip.setBrightness(50);
+    ledStrip.show();
+
+    Serial.begin(9600);
+    Serial.println("--- ROBOT INITIALIZED ---");
 }
 
 void loop() {
-  refreshServo(); 
-  updateLEDs();
-  
-  int sensorValues[SENSOR_COUNT];
-  long weightedSum = 0;
-  int activeSensorCount = 0;
-  unsigned long currentTime = millis();
+    refreshServo(); 
+    updateLEDs();
 
-  // Data acquisition
-  if (currentRobotState >= FOLLOWING) {
-      for (int i = 0; i < SENSOR_COUNT; i++) {
-          sensorValues[i] = analogRead(SENSOR_PINS[i]);
-          if (sensorValues[i] > LINE_THRESHOLD) {
-              weightedSum += (long)SENSOR_WEIGHTS[i];
-              activeSensorCount++;
-          }
-      }
-  }
+    int sensorValues[SENSOR_COUNT];
+    long weightedSum = 0;
+    int activeSensorCount = 0;
+    unsigned long currentTime = millis();
 
-  // State machine logic
-  switch (currentRobotState) {
-      
-      case WAIT_FOR_START:
-          debugState("WAIT_FOR_START");
-          stopMotors();
-          if (getDistanceCm() < OBSTACLE_THRESHOLD_CM) {
-              delay(WAIT_TO_START_DELAY);
-              stateStartTime = millis(); 
-              currentRobotState = CONE_STATE;
-          }
-          break;
+    if (currentRobotState >= FOLLOWING) {
+        for (int i = 0; i < SENSOR_COUNT; i++) {
+            sensorValues[i] = analogRead(SENSOR_PINS[i]);
+            if (sensorValues[i] > LINE_THRESHOLD) {
+                weightedSum += (long)SENSOR_WEIGHTS[i];
+                activeSensorCount++;
+            }
+        }
+    }
 
-      case CONE_STATE:
-          debugState("CONE_STATE");
-          driveForward(SPEED_BASE);
-          if (currentTime - stateStartTime >= CONE_DRIVE_DURATION) {
-              stopMotors();
-              stateStartTime = currentTime;
-              currentRobotState = CONE_GRAB;
-          }
-          break;
+    // State machine logic
+    switch (currentRobotState) {
+        
+        case WAIT_FOR_START:
+            debugState("WAIT_FOR_START");
+            stopMotors();
+            if (getDistanceCm() < OBSTACLE_THRESHOLD_CM) {
+                delay(WAIT_TO_START_DELAY);
+                stateStartTime = millis(); 
+                currentRobotState = CONE_STATE;
+            }
+            break;
 
-      case CONE_GRAB:
-          debugState("CONE_GRAB");
-          isGripperClosed = true; 
-          if (currentTime - stateStartTime >= 1000) { 
-              stateStartTime = currentTime;
-              currentRobotState = ON_COURSE;
-          }
-          break;
+        case CONE_STATE:
+            debugState("CONE_STATE");
+            driveForward(SPEED_BASE);
+            if (currentTime - stateStartTime >= CONE_DRIVE_DURATION) {
+                stopMotors();
+                stateStartTime = currentTime;
+                currentRobotState = CONE_GRAB;
+            }
+            break;
 
-      case ON_COURSE:
-          debugState("ON_COURSE");
-          pivotLeft(SPEED_PIVOT);
-          if (currentTime - stateStartTime >= ENTRY_TURN_DURATION) {
-              raceStartTime = millis(); 
-              currentRobotState = FOLLOWING;
-          }
-          break;
+        case CONE_GRAB:
+            debugState("CONE_GRAB");
+            isGripperClosed = true; 
+            if (currentTime - stateStartTime >= 1000) { 
+                stateStartTime = currentTime;
+                currentRobotState = ON_COURSE;
+            }
+            break;
 
-      case FOLLOWING:
-          debugState("FOLLOWING");
-          
-          // Finish detection
-          if (activeSensorCount >= 7 && (currentTime - raceStartTime > IGNORE_FINISH_DURATION)) {
-              if (finishDetectionTime == 0) {
-                  finishDetectionTime = currentTime;
-              } else if (currentTime - finishDetectionTime >= FINISH_CONFIRM_THRESHOLD) {
-                  currentRobotState = FINISH;
-                  stateStartTime = currentTime;
-              }
-              driveForward();
-              break;
-          } else {
-              finishDetectionTime = 0;
-          }
+        case ON_COURSE:
+            debugState("ON_COURSE");
+            pivotLeft(SPEED_PIVOT);
+            if (currentTime - stateStartTime >= ENTRY_TURN_DURATION) {
+                raceStartTime = millis(); 
+                currentRobotState = FOLLOWING;
+            }
+            break;
 
-          if (activeSensorCount == 0) {
-              currentRobotState = RECOVER;
-              stateStartTime = currentTime;
-              break;
-          }
+        case FOLLOWING:
+            debugState("FOLLOWING");
 
-          // Junction Detection
-          {
-              // A6 and A7 are your far-left sensors
-              bool hasLeft = (sensorValues[6] > LINE_THRESHOLD || sensorValues[7] > LINE_THRESHOLD);
-              
-              if (hasLeft) { 
-                  // We found the turn! Stop the PD controller immediately.
-                  stopMotors(); 
-                  pendingTurnDirection = -1; // Force Left Pivot
-                  currentRobotState = CROSSING; 
-                  stateStartTime = millis(); 
-                  return; // Exit loop to start the turn sequence
-              }
-              
-              // Only check for Right if we didn't find a Left
-              bool hasRight = (sensorValues[0] > LINE_THRESHOLD || sensorValues[1] > LINE_THRESHOLD);
-              if (hasRight) {
-                  pendingTurnDirection = 1; 
-                  currentRobotState = CROSSING; 
-                  stateStartTime = millis(); 
-                  return; 
-              }
-          }
+            if (getDistanceCm() < OBSTACLE_DEADEND) { // If something is within 10cm
+                stopMotors();
+                currentRobotState = DEADEND; // Or DEADEND if you have that state
+                stateStartTime = currentTime;
+                break;
+            }
+            
+            // Finish detection
+            if (activeSensorCount >= 7 && (currentTime - raceStartTime > IGNORE_FINISH_DURATION)) {
+                if (finishDetectionTime == 0) {
+                    finishDetectionTime = currentTime;
+                } else if (currentTime - finishDetectionTime >= FINISH_CONFIRM_THRESHOLD) {
+                    currentRobotState = FINISH;
+                    stateStartTime = currentTime;
+                    stopMotors();
+                    return;
+                }
+                driveForward();
+                break;
+            } else {
+                finishDetectionTime = 0;
+            }
 
-          // PD Driving logic
-          {
-              float currentPos = (float)weightedSum / activeSensorCount;
-              int targetSpeed = map((int)(abs(currentPos) * 10), 0, 70, SPEED_BASE, SPEED_MIN);
-              float correction = (KP_GAIN * currentPos) + (KD_GAIN * (currentPos - previousError));
-              previousError = currentPos;
-              setMotorSpeed(MOTOR_A_2_PIN, MOTOR_A_1_PIN, targetSpeed - (int)correction);
-              setMotorSpeed(MOTOR_B_1_PIN, MOTOR_B_2_PIN, targetSpeed + (int)correction);
-          }
-          break;
+            if (activeSensorCount == 0) {
+                currentRobotState = RECOVER;
+                stateStartTime = currentTime;
+                break;
+            }
 
-      case CROSSING:
-          debugState("CROSSING");
-          driveForward();
-          if (currentTime - stateStartTime >= CROSSING_DURATION) { 
-              currentRobotState = TURNING; 
-              stateStartTime = currentTime; 
-          }
-          break;
+            // Junction Detection
+            {
+                // A6 and A7 are your far-left sensors
+                bool hasLeft = (sensorValues[6] > LINE_THRESHOLD || sensorValues[7] > LINE_THRESHOLD);
+                bool hasStraight = (sensorValues[3] > LINE_THRESHOLD || sensorValues[4] > LINE_THRESHOLD);
+                bool hasRight = (sensorValues[0] > LINE_THRESHOLD || sensorValues[1] > LINE_THRESHOLD);
 
-      case TURNING:
-          debugState("TURNING");
-          if (pendingTurnDirection == -1) pivotLeft(); else pivotRight();
-          if (currentTime - stateStartTime >= BLIND_TURN_DURATION) {
-              currentRobotState = SEARCH; 
-              stateStartTime = currentTime;
-          }
-          break;
+                if (hasLeft) { 
+                    // We found the turn! Stop the PD controller immediately.
+                    stopMotors(); 
+                    pendingTurnDirection = -1; // Force Left Pivot
+                    currentRobotState = CROSSING; 
+                    stateStartTime = millis(); 
+                    return; // Exit loop to start the turn sequence
+                }
 
-      case SEARCH:
-          debugState("SEARCH");
-          if (pendingTurnDirection == -1) pivotLeft(); else pivotRight();
-          if (analogRead(SENSOR_PINS[3]) > LINE_THRESHOLD || analogRead(SENSOR_PINS[4]) > LINE_THRESHOLD) {
-              previousError = 0; 
-              currentRobotState = COOLDOWN; 
-              stateStartTime = currentTime;
-          }
-          break;
+                else if (hasStraight) {
+                    // Do nothing here, let the PD code at the bottom execute
+                }
 
-      case COOLDOWN:
-          debugState("COOLDOWN");
-          driveForward();
-          if (currentTime - stateStartTime >= COOLDOWN_DURATION) {
-              currentRobotState = FOLLOWING;
-          }
-          break;
+                else if (hasRight) {
+                    pendingTurnDirection = 1; 
+                    currentRobotState = CROSSING; 
+                    stateStartTime = millis(); 
+                    return; 
+                }
+            }
 
-      case RECOVER:
-          debugState("RECOVER");
-          if (previousError <= 0) pivotLeft(); else pivotRight();
-          if (activeSensorCount > 0) currentRobotState = FOLLOWING;
-          break;
+            // PD Driving logic
+            {
+                float currentPos = (float)weightedSum / activeSensorCount;
+                int targetSpeed = map((int)(abs(currentPos) * 10), 0, 70, SPEED_BASE, SPEED_MIN);
+                float correction = (KP_GAIN * currentPos) + (KD_GAIN * (currentPos - previousError));
+                previousError = currentPos;
+                setMotorSpeed(MOTOR_A_2_PIN, MOTOR_A_1_PIN, targetSpeed - (int)correction);
+                setMotorSpeed(MOTOR_B_1_PIN, MOTOR_B_2_PIN, targetSpeed + (int)correction);
+            }
+            break;
 
-      case FINISH:
-          debugState("FINISH");
-          driveForward();
-          if (activeSensorCount <= STOP_THRESHOLD) { 
-              stopMotors(); 
-              currentRobotState = BACKUP; 
-              stateStartTime = currentTime; 
-          }
-          break;
+        case CROSSING:
+            debugState("CROSSING");
+            driveForward();
+            if (currentTime - stateStartTime >= CROSSING_DURATION) { 
+                currentRobotState = TURNING; 
+                stateStartTime = currentTime; 
+            }
+            break;
 
-      case BACKUP:
-          debugState("BACKUP");
-          if (currentTime - stateStartTime < BACKUP_DURATION) {
-              setMotorSpeed(MOTOR_A_2_PIN, MOTOR_A_1_PIN, BACKUP_SPEED); 
-              setMotorSpeed(MOTOR_B_1_PIN, MOTOR_B_2_PIN, BACKUP_SPEED);
-          } else { 
-              stopMotors(); 
-              currentRobotState = DONE; 
-          }
-          break;
+        case TURNING:
+            debugState("TURNING");
+            if (pendingTurnDirection == -1) pivotLeft();
+            if (currentTime - stateStartTime >= BLIND_TURN_DURATION) {
+                currentRobotState = SEARCH; 
+                stateStartTime = currentTime;
+            }
+            break;
 
-      case DONE:
-          debugState("DONE");
-          stopMotors();
-          break;
-          
-      default:
-          break;
-  }
+        case SEARCH:
+            debugState("SEARCH");
+            if (pendingTurnDirection == -1) pivotLeft();
+            if (analogRead(SENSOR_PINS[3]) > LINE_THRESHOLD || analogRead(SENSOR_PINS[4]) > LINE_THRESHOLD) {
+                previousError = 0; 
+                currentRobotState = COOLDOWN; 
+                stateStartTime = currentTime;
+            }
+            break;
+
+        case COOLDOWN:
+            debugState("COOLDOWN");
+            driveForward();
+            if (currentTime - stateStartTime >= COOLDOWN_DURATION) {
+                currentRobotState = FOLLOWING;
+            }
+            break;
+
+        case RECOVER:
+            debugState("RECOVER");
+            if (previousError <= 0) pivotLeft();
+            if (activeSensorCount > 0) currentRobotState = FOLLOWING;
+            break;
+
+        case DEADEND:
+            debugState("DEADEND");
+            pivotLeft(); 
+            
+            // Only start looking for the line after 600ms (U_TURN_DURATION)
+            if (currentTime - stateStartTime >= U_TURN_DURATION) {
+                if (analogRead(SENSOR_PINS[3]) > LINE_THRESHOLD || analogRead(SENSOR_PINS[4]) > LINE_THRESHOLD) {
+                    stopMotors();
+                    previousError = 0; 
+                    currentRobotState = COOLDOWN; 
+                    stateStartTime = currentTime;
+                }
+            }
+            break;
+
+        case FINISH:
+            debugState("FINISH");
+                stopMotors(); 
+                isGripperClosed = false;
+            for(int i = 0; i < 25; i++) { 
+                refreshServo(); 
+                delay(20); 
+            }
+            currentRobotState = BACKUP; 
+            stateStartTime = currentTime; 
+            break;
+
+        case BACKUP:
+            debugState("BACKUP");
+            if (currentTime - stateStartTime < BACKUP_DURATION) {
+                setMotorSpeed(MOTOR_A_2_PIN, MOTOR_A_1_PIN, BACKUP_SPEED); 
+                setMotorSpeed(MOTOR_B_1_PIN, MOTOR_B_2_PIN, BACKUP_SPEED);
+            } else { 
+                stopMotors(); 
+                currentRobotState = DONE; 
+            }
+            break;
+
+        case DONE:
+            debugState("DONE");
+            stopMotors();
+            break;
+            
+        default:
+            break;
+    }
 }
